@@ -15,6 +15,8 @@ class ReadingData(BaseModel):
     iout: float = Field(..., ge=0, description="Output current")
     load: float = Field(..., ge=0, le=100, description="Load percentage")
     battery: float = Field(..., ge=0, description="Battery voltage")
+    temperature: float
+    ups_status: str
 
 
 class ReadingIn(BaseModel):
@@ -52,6 +54,8 @@ class ReadingIn(BaseModel):
             "iout": self.data.iout,
             "load": self.data.load,
             "battery": self.data.battery,
+            "temperature": self.data.temperature,
+            "ups_status": self.data.ups_status,
             "raw_payload": self.model_dump(mode="json"),
         }
 
@@ -72,6 +76,8 @@ class ReadingOut(BaseModel):
     iout: float
     load: float
     battery: float
+    temperature: float
+    ups_status: str
     created_at: str | None = None
 
 

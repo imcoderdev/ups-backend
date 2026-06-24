@@ -3,16 +3,15 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from redis.asyncio import Redis
+from pydantic import ValidationError
 
 from app import crud
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.database import get_supabase_client
-from app.queue import create_redis_client, enqueue_reading
 from app.schemas import EnqueueResponse, ErrorResponse, ReadingIn, ReadingOut
 
 settings = get_settings()
@@ -26,14 +25,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis_client = create_redis_client(settings)
-    app.state.redis = redis_client
     app.state.settings = settings
     logger.info("API startup complete")
     try:
         yield
     finally:
-        await redis_client.aclose()
         logger.info("API shutdown complete")
 
 
@@ -41,38 +37,68 @@ app = FastAPI(
     title="IoT UPS Backend",
     version="1.0.0",
     lifespan=lifespan,
-    responses={429: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    responses={500: {"model": ErrorResponse}},
 )
 
 
-@app.middleware("http")
-async def redis_rate_limit(request: Request, call_next):
-    if request.url.path in {"/docs", "/openapi.json", "/redoc"}:
-        return await call_next(request)
-
-    redis_client: Redis = request.app.state.redis
-    active_settings: Settings = request.app.state.settings
-    client_host = request.client.host if request.client else "unknown"
-    key = f"iot:rate:{client_host}:{request.url.path}"
+async def process_and_store(payload: dict) -> None:
+    try:
+        reading = ReadingIn.model_validate(payload)
+    except ValidationError as exc:
+        logger.warning("Dropping invalid background payload: %s", exc)
+        return
 
     try:
-        count = await redis_client.incr(key)
-        if count == 1:
-            await redis_client.expire(key, active_settings.rate_limit_window_seconds)
-        if count > active_settings.rate_limit_requests:
-            logger.warning("Rate limit exceeded for %s", client_host)
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"detail": "Rate limit exceeded"},
+        supabase = get_supabase_client()
+        if await crud.reading_exists(
+            supabase,
+            device_id=reading.device_id,
+            sequence=reading.sequence,
+        ):
+            logger.info(
+                "Duplicate reading skipped before database insert",
+                extra={"device_id": reading.device_id, "sequence": reading.sequence},
             )
-    except Exception:
-        logger.exception("Rate limiter failed")
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "Rate limiter unavailable"},
-        )
+            return
 
-    return await call_next(request)
+        previous_sequence = await crud.get_latest_device_sequence(
+            supabase,
+            device_id=reading.device_id,
+        )
+        if previous_sequence is not None:
+            if reading.sequence > previous_sequence + 1:
+                logger.warning(
+                    "Missing sequence detected for %s: expected %s, got %s",
+                    reading.device_id,
+                    previous_sequence + 1,
+                    reading.sequence,
+                )
+            elif reading.sequence <= previous_sequence:
+                logger.info(
+                    "Out-of-order or repeated sequence observed for %s: last=%s current=%s",
+                    reading.device_id,
+                    previous_sequence,
+                    reading.sequence,
+                )
+
+        await crud.insert_reading(supabase, reading)
+    except crud.DuplicateReadingError:
+        logger.info(
+            "Duplicate reading rejected by database",
+            extra={"device_id": reading.device_id, "sequence": reading.sequence},
+        )
+        return
+    except Exception:
+        logger.exception(
+            "Failed to store reading",
+            extra={"device_id": reading.device_id, "sequence": reading.sequence},
+        )
+        return
+
+    logger.info(
+        "Stored reading",
+        extra={"device_id": reading.device_id, "sequence": reading.sequence},
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -90,20 +116,13 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/api/data", response_model=EnqueueResponse, status_code=status.HTTP_202_ACCEPTED)
-async def receive_data(reading: ReadingIn, request: Request) -> EnqueueResponse:
-    try:
-        await enqueue_reading(request.app.state.redis, request.app.state.settings, reading)
-    except Exception:
-        logger.exception(
-            "Failed to enqueue reading",
-            extra={"device_id": reading.device_id, "sequence": reading.sequence},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Queue unavailable",
-        )
-
-    return EnqueueResponse(status="queued", queue=request.app.state.settings.redis_queue_name)
+async def receive_data(reading: ReadingIn, background_tasks: BackgroundTasks) -> EnqueueResponse:
+    background_tasks.add_task(process_and_store, reading.dict())
+    logger.info(
+        "Scheduled reading for background processing",
+        extra={"device_id": reading.device_id, "sequence": reading.sequence},
+    )
+    return EnqueueResponse(status="queued", queue="background")
 
 
 @app.get("/api/latest", response_model=list[ReadingOut])

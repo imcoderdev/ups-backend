@@ -16,6 +16,37 @@ class DuplicateReadingError(Exception):
     """Raised when Supabase rejects a duplicate device_id + sequence pair."""
 
 
+async def reading_exists(client: Client, device_id: str, sequence: int) -> bool:
+    def _select() -> bool:
+        response = (
+            client.table(READINGS_TABLE)
+            .select("id")
+            .eq("device_id", device_id)
+            .eq("sequence", sequence)
+            .limit(1)
+            .execute()
+        )
+        return bool(response.data)
+
+    return await asyncio.to_thread(_select)
+
+
+async def get_latest_device_sequence(client: Client, device_id: str) -> int | None:
+    def _select() -> int | None:
+        response = (
+            client.table(READINGS_TABLE)
+            .select("sequence")
+            .eq("device_id", device_id)
+            .order("sequence", desc=True)
+            .limit(1)
+            .execute()
+        )
+        data = response.data or []
+        return int(data[0]["sequence"]) if data else None
+
+    return await asyncio.to_thread(_select)
+
+
 async def insert_reading(client: Client, reading: ReadingIn) -> dict[str, Any]:
     row = reading.to_supabase_row()
 

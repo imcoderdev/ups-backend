@@ -26,17 +26,27 @@ logger = logging.getLogger(__name__)
 
 def make_payload(device_id: str, sequence: int) -> dict:
     load = round(random.uniform(20, 95), 2)
+    vin = round(random.uniform(215, 245), 2)
+    if vin >= 200:
+        ups_status = "online"
+    elif vin > 0:
+        ups_status = "on_battery"
+    else:
+        ups_status = "fault"
+
     return {
         "device_id": device_id,
         "sequence": sequence,
         "timestamp": int(time.time()),
         "data": {
-            "vin": round(random.uniform(215, 245), 2),
+            "vin": vin,
             "vout": round(random.uniform(210, 235), 2),
             "iin": round(random.uniform(1, 8), 2),
             "iout": round(random.uniform(1, 7), 2),
             "load": load,
             "battery": round(random.uniform(11.8, 13.8), 2),
+            "temperature": round(random.uniform(25.0, 55.0), 2),
+            "ups_status": ups_status,
         },
     }
 
