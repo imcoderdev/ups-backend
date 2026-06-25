@@ -55,12 +55,10 @@ python test/simulator.py
   "data": {
     "vin": 230,
     "vout": 220,
-    "iin": 3,
-    "iout": 2,
-    "load": 80,
     "battery": 12.5,
-    "temperature": 36.75,
-    "ups_status": "online"
+    "load": 462,
+    "temperature": 60,
+    "ups_status": "UPS ON"
   }
 }
 ```

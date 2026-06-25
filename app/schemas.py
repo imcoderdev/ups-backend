@@ -11,9 +11,7 @@ class ReadingData(BaseModel):
 
     vin: float = Field(..., ge=0, description="Input voltage")
     vout: float = Field(..., ge=0, description="Output voltage")
-    iin: float = Field(..., ge=0, description="Input current")
-    iout: float = Field(..., ge=0, description="Output current")
-    load: float = Field(..., ge=0, le=100, description="Load percentage")
+    load: float = Field(..., ge=0, description="Load in Watts (W)")
     battery: float = Field(..., ge=0, description="Battery voltage")
     temperature: float
     ups_status: str
@@ -50,8 +48,6 @@ class ReadingIn(BaseModel):
             "device_timestamp": datetime.fromtimestamp(self.timestamp, tz=timezone.utc).isoformat(),
             "vin": self.data.vin,
             "vout": self.data.vout,
-            "iin": self.data.iin,
-            "iout": self.data.iout,
             "load": self.data.load,
             "battery": self.data.battery,
             "temperature": self.data.temperature,
@@ -72,8 +68,6 @@ class ReadingOut(BaseModel):
     device_timestamp: str
     vin: float
     vout: float
-    iin: float
-    iout: float
     load: float
     battery: float
     temperature: float

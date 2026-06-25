@@ -25,14 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def make_payload(device_id: str, sequence: int) -> dict:
-    load = round(random.uniform(20, 95), 2)
-    vin = round(random.uniform(215, 245), 2)
-    if vin >= 200:
-        ups_status = "online"
-    elif vin > 0:
-        ups_status = "on_battery"
-    else:
-        ups_status = "fault"
+    # Occasionally report zero input voltage to simulate a utility power cut.
+    vin = 0.0 if random.random() < 0.1 else round(random.uniform(0.0, 240.0), 2)
+    ups_status = "UPS ON" if vin >= 200.0 else "UPS OFF"
 
     return {
         "device_id": device_id,
@@ -40,12 +35,10 @@ def make_payload(device_id: str, sequence: int) -> dict:
         "timestamp": int(time.time()),
         "data": {
             "vin": vin,
-            "vout": round(random.uniform(210, 235), 2),
-            "iin": round(random.uniform(1, 8), 2),
-            "iout": round(random.uniform(1, 7), 2),
-            "load": load,
-            "battery": round(random.uniform(11.8, 13.8), 2),
-            "temperature": round(random.uniform(25.0, 55.0), 2),
+            "vout": round(random.uniform(220.0, 230.0), 2),
+            "battery": round(random.uniform(10.5, 13.5), 2),
+            "load": round(random.uniform(200.0, 800.0), 2),
+            "temperature": round(random.uniform(30.0, 80.0), 2),
             "ups_status": ups_status,
         },
     }
